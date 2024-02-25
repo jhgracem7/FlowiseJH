@@ -1,11 +1,10 @@
-import { ICommonObject, INode, INodeData } from '../../../src/Interface'
-import { Embeddings } from 'langchain/embeddings/base'
-import { Document } from 'langchain/document'
-
-import { ElasticClientArgs, ElasticVectorSearch } from 'langchain/vectorstores/elasticsearch'
 import { flatten } from 'lodash'
+import { Embeddings } from '@langchain/core/embeddings'
+import { Document } from '@langchain/core/documents'
+import { VectorStore } from '@langchain/core/vectorstores'
+import { ElasticClientArgs, ElasticVectorSearch } from '@langchain/community/vectorstores/elasticsearch'
+import { ICommonObject, INode, INodeData } from '../../../src/Interface'
 import { ElasticSearchBase } from './ElasticSearchBase'
-import { VectorStore } from 'langchain/vectorstores/base'
 
 class ElasicsearchUpsert_VectorStores extends ElasticSearchBase implements INode {
     constructor() {
@@ -38,7 +37,9 @@ class ElasicsearchUpsert_VectorStores extends ElasticSearchBase implements INode
         const flattenDocs = docs && docs.length ? flatten(docs) : []
         const finalDocs = []
         for (let i = 0; i < flattenDocs.length; i += 1) {
-            finalDocs.push(new Document(flattenDocs[i]))
+            if (flattenDocs[i] && flattenDocs[i].pageContent) {
+                finalDocs.push(new Document(flattenDocs[i]))
+            }
         }
 
         // The following code is a workaround for a bug (Langchain Issue #1589) in the underlying library.
@@ -48,7 +49,7 @@ class ElasicsearchUpsert_VectorStores extends ElasticSearchBase implements INode
             delete d.metadata.loc
         })
         // end of workaround
-        return super.init(nodeData, _, options, flattenDocs)
+        return super.init(nodeData, _, options, finalDocs)
     }
 }
 

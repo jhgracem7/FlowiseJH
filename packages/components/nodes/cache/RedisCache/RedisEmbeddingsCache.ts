@@ -1,8 +1,45 @@
-import { getBaseClasses, getCredentialData, getCredentialParam, ICommonObject, INode, INodeData, INodeParams } from '../../../src'
-import { Redis } from 'ioredis'
+import { Redis, RedisOptions } from 'ioredis'
+import { isEqual } from 'lodash'
+import { RedisByteStore } from '@langchain/community/storage/ioredis'
+import { Embeddings } from '@langchain/core/embeddings'
 import { CacheBackedEmbeddings } from 'langchain/embeddings/cache_backed'
-import { RedisByteStore } from 'langchain/storage/ioredis'
-import { Embeddings } from 'langchain/embeddings/base'
+import { getBaseClasses, getCredentialData, getCredentialParam, ICommonObject, INode, INodeData, INodeParams } from '../../../src'
+
+let redisClientSingleton: Redis
+let redisClientOption: RedisOptions
+let redisClientUrl: string
+
+const getRedisClientbyOption = (option: RedisOptions) => {
+    if (!redisClientSingleton) {
+        // if client doesn't exists
+        redisClientSingleton = new Redis(option)
+        redisClientOption = option
+        return redisClientSingleton
+    } else if (redisClientSingleton && !isEqual(option, redisClientOption)) {
+        // if client exists but option changed
+        redisClientSingleton.quit()
+        redisClientSingleton = new Redis(option)
+        redisClientOption = option
+        return redisClientSingleton
+    }
+    return redisClientSingleton
+}
+
+const getRedisClientbyUrl = (url: string) => {
+    if (!redisClientSingleton) {
+        // if client doesn't exists
+        redisClientSingleton = new Redis(url)
+        redisClientUrl = url
+        return redisClientSingleton
+    } else if (redisClientSingleton && url !== redisClientUrl) {
+        // if client exists but option changed
+        redisClientSingleton.quit()
+        redisClientSingleton = new Redis(url)
+        redisClientUrl = url
+        return redisClientSingleton
+    }
+    return redisClientSingleton
+}
 
 class RedisEmbeddingsCache implements INode {
     label: string
@@ -30,7 +67,7 @@ class RedisEmbeddingsCache implements INode {
             name: 'credential',
             type: 'credential',
             optional: true,
-            credentialNames: ['redisCacheApi']
+            credentialNames: ['redisCacheApi', 'redisCacheUrlApi']
         }
         this.inputs = [
             {
@@ -63,17 +100,29 @@ class RedisEmbeddingsCache implements INode {
         const underlyingEmbeddings = nodeData.inputs?.embeddings as Embeddings
 
         const credentialData = await getCredentialData(nodeData.credential ?? '', options)
-        const username = getCredentialParam('redisCacheUser', credentialData, nodeData)
-        const password = getCredentialParam('redisCachePwd', credentialData, nodeData)
-        const portStr = getCredentialParam('redisCachePort', credentialData, nodeData)
-        const host = getCredentialParam('redisCacheHost', credentialData, nodeData)
+        const redisUrl = getCredentialParam('redisUrl', credentialData, nodeData)
 
-        const client = new Redis({
-            port: portStr ? parseInt(portStr) : 6379,
-            host,
-            username,
-            password
-        })
+        let client: Redis
+        if (!redisUrl || redisUrl === '') {
+            const username = getCredentialParam('redisCacheUser', credentialData, nodeData)
+            const password = getCredentialParam('redisCachePwd', credentialData, nodeData)
+            const portStr = getCredentialParam('redisCachePort', credentialData, nodeData)
+            const host = getCredentialParam('redisCacheHost', credentialData, nodeData)
+            const sslEnabled = getCredentialParam('redisCacheSslEnabled', credentialData, nodeData)
+
+            const tlsOptions = sslEnabled === true ? { tls: { rejectUnauthorized: false } } : {}
+
+            client = getRedisClientbyOption({
+                port: portStr ? parseInt(portStr) : 6379,
+                host,
+                username,
+                password,
+                ...tlsOptions
+            })
+        } else {
+            client = getRedisClientbyUrl(redisUrl)
+        }
+
         ttl ??= '3600'
         let ttlNumber = parseInt(ttl, 10)
         const redisStore = new RedisByteStore({
